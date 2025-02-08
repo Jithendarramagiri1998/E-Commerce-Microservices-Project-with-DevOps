@@ -1,17 +1,16 @@
-# User Service - Microservice Setup
+# User Service - Microservice Setup on AWS EKS
 
-This document provides step-by-step instructions to set up the **User Service** microservice, containerize it with Docker, deploy it using Kubernetes, and integrate it with CI/CD for automated deployment.
+This README provides a step-by-step guide to setting up the **User Service** microservice, containerizing it with Docker, deploying it on **AWS EKS (Elastic Kubernetes Service)**, and integrating it with **CI/CD using GitHub Actions**.
 
 ---
 
 ## 📌 Prerequisites
-Ensure you have the following installed:
-- **Node.js** (v18+)
-- **MongoDB**
-- **Docker & Docker Compose**
-- **Kubernetes & kubectl**
-- **Terraform (for AWS infrastructure)**
-- **GitHub Account (for CI/CD)**
+Ensure you have the following installed and configured:
+- **AWS CLI** (`aws configure`)
+- **kubectl** (`aws eks update-kubeconfig`)
+- **eksctl** (`brew install eksctl` or `choco install eksctl`)
+- **Docker & Docker Hub account**
+- **GitHub Actions Secrets** (AWS credentials & Docker Hub credentials)
 
 ---
 
@@ -23,39 +22,20 @@ cd user-service
 
 ---
 
-## ⚡ 2. Install Dependencies
+## 🏗️ 2. Set Up AWS EKS Cluster
+Create an EKS cluster with **2 worker nodes**:
 ```sh
-npm install
+eksctl create cluster --name user-service-cluster --region us-east-1 --nodes 2
+```
+
+Verify the cluster is running:
+```sh
+kubectl get nodes
 ```
 
 ---
 
-## 🔧 3. Environment Configuration
-Create a **`.env`** file in the root directory:
-```ini
-MONGO_URI=mongodb://localhost:27017/userdb
-JWT_SECRET=mysecretkey
-```
-
----
-
-## 🏃 4. Run Locally
-Start MongoDB and the Node.js service:
-```sh
-node server.js
-```
-Check the API:
-```sh
-curl http://localhost:5001/
-```
-Expected response:
-```
-You did a wonderful job! 🎉
-```
-
----
-
-## 📜 5. Server Script (`server.js`)
+## 📜 3. Server Script (`server.js`)
 Create a **`server.js`** file:
 ```javascript
 const express = require('express');
@@ -78,7 +58,16 @@ app.listen(5001, () => console.log("User Service running on port 5001"));
 
 ---
 
-## 🐳 6. Docker Setup
+## 🔧 4. Environment Configuration
+Create a **`.env`** file:
+```ini
+MONGO_URI=mongodb://localhost:27017/userdb
+JWT_SECRET=mysecretkey
+```
+
+---
+
+## 🐳 5. Docker Setup
 
 ### Create a Dockerfile
 ```dockerfile
@@ -99,37 +88,46 @@ docker run -p 5001:5001 --env-file .env user-service
 
 ---
 
-## 🐋 7. Docker Compose Setup
-Create a **`docker-compose.yaml`** file:
+## ☸️ 6. Deploy to AWS EKS
+
+### Deploy MongoDB (`k8s/mongodb-deployment.yaml`)
 ```yaml
-version: "3.8"
-services:
-  user-service:
-    build: ./
-    ports:
-      - "5001:5001"
-    depends_on:
-      - mongodb
-    environment:
-      - MONGO_URI=mongodb://mongodb:27017/userdb
-  
-  mongodb:
-    image: mongo
-    ports:
-      - "27017:27017"
-```
-
-Run the services:
-```sh
-docker-compose up -d
-```
-
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo
+        ports:
+        - containerPort: 27017
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+spec:
+  ports:
+  - port: 27017
+  selector:
+    app: mongodb
+```
+**Deploy MongoDB:**
+```sh
+kubectl apply -f k8s/mongodb-deployment.yaml
+```
 
-## ☸️ 8. Kubernetes Deployment
-
-### Create Deployment YAML
-Create **`k8s/user-service.yaml`**:
+### Deploy User Service (`k8s/user-service.yaml`)
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -146,33 +144,44 @@ spec:
         app: user-service
     spec:
       containers:
-        - name: user-service
-          image: your-dockerhub-username/user-service:latest
-          ports:
-            - containerPort: 5001
-          env:
-            - name: MONGO_URI
-              value: "mongodb://mongodb:27017/userdb"
+      - name: user-service
+        image: your-dockerhub-username/user-service:latest
+        ports:
+        - containerPort: 5001
+        env:
+        - name: MONGO_URI
+          value: "mongodb://mongodb:27017/userdb"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: user-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5001
 ```
-
-### Deploy to Kubernetes
+**Deploy the service:**
 ```sh
 kubectl apply -f k8s/user-service.yaml
 ```
 
-Check the running pods:
+**Check the running services:**
 ```sh
-kubectl get pods
+kubectl get svc
 ```
-
-Restart deployment if needed:
+Access the service using:
 ```sh
-kubectl rollout restart deployment user-service
+http://<EXTERNAL-IP>/
 ```
 
 ---
 
-## ⚙️ 9. CI/CD with GitHub Actions
+## ⚙️ 7. CI/CD with GitHub Actions
 Create **`.github/workflows/deploy.yml`**:
 ```yaml
 name: CI/CD Pipeline
@@ -182,7 +191,7 @@ on:
       - main
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -198,49 +207,60 @@ jobs:
           docker tag user-service:latest your-dockerhub-username/user-service:latest
           docker push your-dockerhub-username/user-service:latest
 
-      - name: Deploy to Kubernetes
+      - name: Configure AWS CLI
         run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region us-east-1
+
+      - name: Deploy to EKS
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name user-service-cluster
           kubectl apply -f k8s/user-service.yaml
 ```
 
-Commit and push the code to trigger deployment:
+### Steps to Enable CI/CD:
+1. **Add GitHub Secrets:**
+   - `DOCKER_USERNAME` → Your Docker Hub username
+   - `DOCKER_PASSWORD` → Your Docker Hub password
+   - `AWS_ACCESS_KEY_ID` → AWS access key
+   - `AWS_SECRET_ACCESS_KEY` → AWS secret key
+
+2. **Commit & Push Code:**
 ```sh
 git add .
-git commit -m "Initial setup"
+git commit -m "Deploy User Service to EKS"
 git push origin main
 ```
+Your service will be automatically deployed to **AWS EKS** when you push changes! 🎉
 
 ---
 
-## 🔍 10. Troubleshooting
-### Check Logs in Docker
+## 🔍 8. Monitoring & Logs
+### Check Running Services
 ```sh
-docker logs $(docker ps -q --filter "name=user-service")
+kubectl get pods
+kubectl get svc
 ```
 
-### Check Logs in Kubernetes
+### Check Logs
 ```sh
 kubectl logs -l app=user-service
 ```
 
-### Restart the Service
+### Restart Deployment
 ```sh
-docker-compose restart user-service
 kubectl rollout restart deployment user-service
 ```
 
 ---
 
 ## 🎯 Summary
-✅ **Microservices** (Node.js + MongoDB)
-✅ **Dockerized** (Docker & Docker Compose)
-✅ **Orchestrated** (Kubernetes Deployment)
-✅ **CI/CD Pipeline** (GitHub Actions)
-✅ **Infrastructure as Code** (Terraform AWS)
-✅ **Monitoring & Security** (Prometheus, Grafana, Trivy)
+✅ **AWS EKS Cluster** created with `eksctl`
+✅ **MongoDB & User Service** deployed
+✅ **LoadBalancer Service** exposed externally
+✅ **CI/CD pipeline with GitHub Actions**
+✅ **Logs & Monitoring** enabled
 
----
-
-## 📢 Need Help?
-Feel free to reach out via **GitHub Issues** or [LinkedIn](https://www.linkedin.com/in/YOUR_PROFILE/). Happy coding! 🚀
+📢 Need Help? Feel free to reach out via **GitHub Issues** or [LinkedIn](https://www.linkedin.com/in/YOUR_PROFILE/). Happy coding! 🚀
 
