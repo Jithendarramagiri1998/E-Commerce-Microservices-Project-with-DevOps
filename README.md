@@ -262,5 +262,5 @@ kubectl rollout restart deployment user-service
 ✅ **CI/CD pipeline with GitHub Actions**
 ✅ **Logs & Monitoring** enabled
 
-📢 Need Help? Feel free to reach out via **GitHub Issues** or [LinkedIn](https://www.linkedin.com/in/YOUR_PROFILE/). Happy coding! 🚀
+📢 Need Help? Feel free to reach out via **GitHub Issues** or [LinkedIn]www.linkedin.com/in/ramagiri-jithendar-365819307/). Happy coding! 🚀
 
