@@ -5,7 +5,7 @@ on:
       - main
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -13,15 +13,21 @@ jobs:
 
       - name: Build Docker Image
         run: |
-          docker build -t user-service:latest ./user-service
+          docker build -t user-service:latest ./
 
-      - name: Push Image to Docker Hub
+      - name: Push to Docker Hub
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-          docker tag user-service:latest YOUR_DOCKER_HUB/user-service:latest
-          docker push YOUR_DOCKER_HUB/user-service:latest
+          docker tag user-service:latest your-dockerhub-username/user-service:latest
+          docker push your-dockerhub-username/user-service:latest
 
-      - name: Deploy to Kubernetes
+      - name: Configure AWS CLI
         run: |
-          kubectl apply -f infra/k8s/user-service.yaml
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region us-east-1
 
+      - name: Deploy to EKS
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name user-service-cluster
+          kubectl apply -f k8s/user-service.yaml
