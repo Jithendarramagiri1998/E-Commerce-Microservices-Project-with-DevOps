@@ -13,8 +13,23 @@ spec:
         app: user-service
     spec:
       containers:
-        - name: user-service
-          image: user-service:latest
-          ports:
-            - containerPort: 5001
-
+      - name: user-service
+        image: your-dockerhub-username/user-service:latest
+        ports:
+        - containerPort: 5001
+        env:
+        - name: MONGO_URI
+          value: "mongodb://mongodb:27017/userdb"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: user-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5001
